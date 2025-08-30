@@ -13,6 +13,36 @@ const supabaseAnonKey =
 // Create Supabase client
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Create table if it doesn't exist
+async function createTable() {
+  try {
+    const { error } = await supabase.rpc("exec_sql", {
+      sql: `
+        CREATE TABLE IF NOT EXISTS students (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          age INTEGER,
+          gender TEXT,
+          midterm REAL,
+          final REAL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `,
+    });
+
+    if (error) {
+      console.log("Table creation note:", error.message);
+    } else {
+      console.log("Students table ready");
+    }
+  } catch (err) {
+    console.log("Table setup:", err.message);
+  }
+}
+
+// Call table creation
+createTable();
+
 // Middleware
 app.use(cors());
 app.use(express.json());
