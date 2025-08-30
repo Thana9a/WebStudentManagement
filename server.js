@@ -22,6 +22,25 @@ let dbConnected = false;
 // Connect to database
 async function connectDB() {
   try {
+    console.log("Environment variables check:");
+    console.log(
+      "SUPABASE_HOST:",
+      process.env.SUPABASE_HOST ? "SET" : "NOT SET"
+    );
+    console.log(
+      "SUPABASE_PORT:",
+      process.env.SUPABASE_PORT ? "SET" : "NOT SET"
+    );
+    console.log("SUPABASE_DB:", process.env.SUPABASE_DB ? "SET" : "NOT SET");
+    console.log(
+      "SUPABASE_USER:",
+      process.env.SUPABASE_USER ? "SET" : "NOT SET"
+    );
+    console.log(
+      "SUPABASE_PASSWORD:",
+      process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET"
+    );
+
     if (!process.env.SUPABASE_PASSWORD) {
       console.log("No database password - running in demo mode");
       return;
@@ -58,12 +77,19 @@ app.use(express.json());
 // Serve static files from public folder
 app.use(express.static(path.join(__dirname, "public")));
 
-// Health check
+// Health check with more details
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
-    database: dbConnected ? "connected" : "demo",
+    database: dbConnected ? "connected" : "disconnected",
     message: dbConnected ? "Database connected" : "Running in demo mode",
+    env: {
+      host: process.env.SUPABASE_HOST ? "SET" : "NOT SET",
+      port: process.env.SUPABASE_PORT ? "SET" : "NOT SET",
+      database: process.env.SUPABASE_DB ? "SET" : "NOT SET",
+      user: process.env.SUPABASE_USER ? "SET" : "NOT SET",
+      password: process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET",
+    },
   });
 });
 
