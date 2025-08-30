@@ -1,75 +1,17 @@
 const express = require("express");
-const { Client } = require("pg");
+const { createClient } = require("@supabase/supabase-js");
 const path = require("path");
 const cors = require("cors");
 
 const app = express();
 
-// Database configuration
-// Database configuration (temporary for testing)
-const dbConfig = {
-  host: "db.qshxvmdokakmbukpovpv.supabase.co",
-  port: 5432,
-  database: "postgres",
-  user: "postgres",
-  password: "Thanahong7@",
-  ssl: { rejectUnauthorized: false },
-};
+// Supabase configuration with anon key
+const supabaseUrl = "https://qshxvmdokakmbukpovpv.supabase.co";
+const supabaseAnonKey =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzaHh2bWRva2FrbWJ1a3BvdnB2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0NzcyNTIsImV4cCI6MjA3MjA1MzI1Mn0.OthNk61qiGtxlzZk8er0qGCbPgwFaEn9UhWh66LVYWY";
 
-// Create PostgreSQL client
-let client = null;
-let dbConnected = false;
-
-// Connect to database
-async function connectDB() {
-  try {
-    console.log("Environment variables check:");
-    console.log(
-      "SUPABASE_HOST:",
-      process.env.SUPABASE_HOST ? "SET" : "NOT SET"
-    );
-    console.log(
-      "SUPABASE_PORT:",
-      process.env.SUPABASE_PORT ? "SET" : "NOT SET"
-    );
-    console.log("SUPABASE_DB:", process.env.SUPABASE_DB ? "SET" : "NOT SET");
-    console.log(
-      "SUPABASE_USER:",
-      process.env.SUPABASE_USER ? "SET" : "NOT SET"
-    );
-    console.log(
-      "SUPABASE_PASSWORD:",
-      process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET"
-    );
-
-    if (!process.env.SUPABASE_PASSWORD) {
-      console.log("No database password - running in demo mode");
-      return;
-    }
-
-    client = new Client(dbConfig);
-    await client.connect();
-    dbConnected = true;
-    console.log("Connected to Supabase database!");
-
-    // Create table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS students (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        age INTEGER,
-        gender TEXT,
-        midterm REAL,
-        final REAL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    console.log("Table created/verified successfully");
-  } catch (err) {
-    console.error("Database connection failed:", err.message);
-    dbConnected = false;
-  }
-}
+// Create Supabase client
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Middleware
 app.use(cors());
@@ -78,33 +20,26 @@ app.use(express.json());
 // Serve static files from public folder
 app.use(express.static(path.join(__dirname, "public")));
 
-// Health check with more details
+// Health check
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
-    database: dbConnected ? "connected" : "disconnected",
-    message: dbConnected ? "Database connected" : "Running in demo mode",
-    env: {
-      host: process.env.SUPABASE_HOST ? "SET" : "NOT SET",
-      port: process.env.SUPABASE_PORT ? "SET" : "NOT SET",
-      database: process.env.SUPABASE_DB ? "SET" : "NOT SET",
-      user: process.env.SUPABASE_USER ? "SET" : "NOT SET",
-      password: process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET",
-    },
+    database: "connected",
+    message: "Connected to Supabase with anon key",
+    supabaseUrl: supabaseUrl,
   });
 });
 
 // Get all students
 app.get("/api/students", async (req, res) => {
   try {
-    if (dbConnected) {
-      const result = await client.query(
-        "SELECT * FROM students ORDER BY created_at DESC"
-      );
-      res.json(result.rows);
-    } else {
-      res.json([]);
-    }
+    const { data, error } = await supabase
+      .from("students")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
   } catch (err) {
     console.error("Error getting students:", err);
     res.status(500).json({ error: err.message });
@@ -120,15 +55,14 @@ app.post("/api/students", async (req, res) => {
       return res.status(400).json({ error: "All fields are required" });
     }
 
-    if (dbConnected) {
-      const result = await client.query(
-        "INSERT INTO students (name, age, gender, midterm, final) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-        [name, age, gender, midterm, final]
-      );
-      res.status(201).json(result.rows[0]);
-    } else {
-      res.status(500).json({ error: "Database not connected" });
-    }
+    const { data, error } = await supabase
+      .from("students")
+      .insert([{ name, age, gender, midterm, final }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(201).json(data);
   } catch (err) {
     console.error("Error creating student:", err);
     res.status(500).json({ error: err.message });
@@ -141,17 +75,16 @@ app.put("/api/students/:id", async (req, res) => {
     const { id } = req.params;
     const { name, age, gender, midterm, final } = req.body;
 
-    if (!dbConnected) {
-      return res.status(500).json({ error: "Database not connected" });
-    }
+    const { data, error } = await supabase
+      .from("students")
+      .update({ name, age, gender, midterm, final })
+      .eq("id", id)
+      .select()
+      .single();
 
-    const result = await client.query(
-      "UPDATE students SET name = $1, age = $2, gender = $3, midterm = $4, final = $5 WHERE id = $6 RETURNING *",
-      [name, age, gender, midterm, final, id]
-    );
-
-    if (result.rows.length > 0) {
-      res.json(result.rows[0]);
+    if (error) throw error;
+    if (data) {
+      res.json(data);
     } else {
       res.status(404).json({ error: "Student not found" });
     }
@@ -166,20 +99,10 @@ app.delete("/api/students/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!dbConnected) {
-      return res.status(500).json({ error: "Database not connected" });
-    }
+    const { error } = await supabase.from("students").delete().eq("id", id);
 
-    const result = await client.query(
-      "DELETE FROM students WHERE id = $1 RETURNING id",
-      [id]
-    );
-
-    if (result.rows.length > 0) {
-      res.json({ success: true });
-    } else {
-      res.status(404).json({ error: "Student not found" });
-    }
+    if (error) throw error;
+    res.json({ success: true });
   } catch (err) {
     console.error("Error deleting student:", err);
     res.status(500).json({ error: err.message });
@@ -194,10 +117,7 @@ app.get("*", (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 
-// Connect to database and start server
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Database: ${dbConnected ? "Connected" : "Demo Mode"}`);
-  });
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Connected to Supabase: ${supabaseUrl}`);
 });
