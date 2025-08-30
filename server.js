@@ -6,12 +6,13 @@ const cors = require("cors");
 const app = express();
 
 // Database configuration
+// Database configuration (temporary for testing)
 const dbConfig = {
-  host: process.env.SUPABASE_HOST || "db.qshxvmdokakmbukpovpv.supabase.co",
-  port: process.env.SUPABASE_PORT || 5432,
-  database: process.env.SUPABASE_DB || "postgres",
-  user: process.env.SUPABASE_USER || "postgres",
-  password: process.env.SUPABASE_PASSWORD,
+  host: "db.qshxvmdokakmbukpovpv.supabase.co",
+  port: 5432,
+  database: "postgres",
+  user: "postgres",
+  password: "Thanahong7@",
   ssl: { rejectUnauthorized: false },
 };
 
