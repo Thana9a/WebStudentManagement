@@ -1,194 +1,216 @@
 const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
+const { Client } = require("pg");
 const path = require("path");
 const cors = require("cors");
 
 const app = express();
-const DB_FILE = path.join(__dirname, "data.sqlite");
-const db = new sqlite3.Database(DB_FILE);
+
+// Database configuration
+const dbConfig = {
+  host: process.env.SUPABASE_HOST || "db.qshxvmdokakmbukpovpv.supabase.co",
+  port: process.env.SUPABASE_PORT || 5432,
+  database: process.env.SUPABASE_DB || "postgres",
+  user: process.env.SUPABASE_USER || "postgres",
+  password: process.env.SUPABASE_PASSWORD,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
+};
+
+// Create PostgreSQL client
+const client = new Client(dbConfig);
+
+// Connect to database
+async function connectDB() {
+  try {
+    await client.connect();
+    console.log("Connected to Supabase PostgreSQL database");
+    
+    // Initialize database tables
+    await initDatabase();
+  } catch (err) {
+    console.error("Database connection error:", err);
+    process.exit(1);
+  }
+}
+
+// Initialize database tables
+async function initDatabase() {
+  try {
+    // Create students table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS students (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        age INTEGER,
+        grade TEXT,
+        notes TEXT,
+        midterm REAL,
+        final REAL,
+        gender TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    console.log("Database initialized successfully");
+  } catch (err) {
+    console.error("Database initialization error:", err);
+  }
+}
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname))); // serves index.html, style.css, script.js
+app.use(express.static(path.join(__dirname)));
 
-// Helper: run SQL (promise)
-function run(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
-}
-function all(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
-  });
-}
-function get(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
-  });
-}
-
-// Initialize + migrate
-async function init() {
-  // Base table (original or new)
-  await run(
-    db,
-    `CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    age INTEGER,
-    grade TEXT,          -- legacy (may be unused now)
-    notes TEXT,          -- legacy
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`
-  );
-
-  // Check existing columns
-  const cols = await all(db, `PRAGMA table_info(students)`);
-  const names = cols.map((c) => c.name);
-  const needed = [
-    { name: "midterm", def: "REAL" },
-    { name: "final", def: "REAL" },
-    { name: "gender", def: "TEXT" },
-  ];
-  for (const col of needed) {
-    if (!names.includes(col.name)) {
-      console.log(`Migrating: adding column ${col.name}`);
-      await run(db, `ALTER TABLE students ADD COLUMN ${col.name} ${col.def}`);
-    }
-  }
-  console.log(
-    "DB ready. Columns:",
-    (await all(db, `PRAGMA table_info(students)`)).map((c) => c.name).join(", ")
-  );
-}
-
-init().catch((err) => {
-  console.error("Fatal DB init error:", err);
-  process.exit(1);
-});
-
-// Routes
+// Health check endpoint
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
+// Get all students with search
 app.get("/api/students", async (req, res) => {
   try {
     const q = (req.query.q || "").toString().trim();
-    let rows;
+    let query, params;
+    
     if (q) {
-      // Search by name (LIKE) or exact id match
-      const like = `%${q.replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
       const maybeId = Number(q);
       if (!Number.isNaN(maybeId)) {
-        rows = await all(
-          db,
-          `SELECT * FROM students
-           WHERE name LIKE ? ESCAPE '\\' OR id = ?
-           ORDER BY created_at DESC`,
-          [like, maybeId]
-        );
+        query = `
+          SELECT * FROM students 
+          WHERE name ILIKE $1 OR id = $2 
+          ORDER BY created_at DESC
+        `;
+        params = [`%${q}%`, maybeId];
       } else {
-        rows = await all(
-          db,
-          `SELECT * FROM students
-           WHERE name LIKE ? ESCAPE '\\'
-           ORDER BY created_at DESC`,
-          [like]
-        );
+        query = `
+          SELECT * FROM students 
+          WHERE name ILIKE $1 
+          ORDER BY created_at DESC
+        `;
+        params = [`%${q}%`];
       }
     } else {
-      rows = await all(db, "SELECT * FROM students ORDER BY created_at DESC");
+      query = "SELECT * FROM students ORDER BY created_at DESC";
+      params = [];
     }
-    res.json(rows);
-  } catch (e) {
-    console.error("GET /api/students error:", e);
-    res.status(500).json({ error: e.message });
+    
+    const result = await client.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/students error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+// Get single student
 app.get("/api/students/:id", async (req, res) => {
   try {
-    const row = await get(db, "SELECT * FROM students WHERE id=?", [
-      req.params.id,
-    ]);
-    if (!row) return res.status(404).json({ error: "Not found" });
-    res.json(row);
-  } catch (e) {
-    console.error("GET one error:", e);
-    res.status(500).json({ error: e.message });
+    const result = await client.query(
+      "SELECT * FROM students WHERE id = $1",
+      [req.params.id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("GET student error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+// Create new student
 app.post("/api/students", async (req, res) => {
   try {
     const { name, age, gender, midterm, final } = req.body;
+    
     if (!name) return res.status(400).json({ error: "Name required" });
     if (age == null) return res.status(400).json({ error: "Age required" });
     if (!gender) return res.status(400).json({ error: "Gender required" });
-    if (midterm == null)
-      return res.status(400).json({ error: "Midterm required" });
+    if (midterm == null) return res.status(400).json({ error: "Midterm required" });
     if (final == null) return res.status(400).json({ error: "Final required" });
 
-    // Insert (keep legacy columns NULL)
-    const stmt = await run(
-      db,
-      "INSERT INTO students (name, age, gender, midterm, final) VALUES (?,?,?,?,?)",
+    const result = await client.query(
+      `INSERT INTO students (name, age, gender, midterm, final) 
+       VALUES ($1, $2, $3, $4, $5) 
+       RETURNING *`,
       [name, age, gender, midterm, final]
     );
-    const row = await get(db, "SELECT * FROM students WHERE id=?", [
-      stmt.lastID,
-    ]);
-    res.status(201).json(row);
-  } catch (e) {
-    console.error("POST /api/students error:", e);
-    res.status(500).json({ error: e.message });
+    
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("POST /api/students error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+// Update student
 app.put("/api/students/:id", async (req, res) => {
   try {
     const { name, age, gender, midterm, final } = req.body;
+    
     if (!name) return res.status(400).json({ error: "Name required" });
     if (age == null) return res.status(400).json({ error: "Age required" });
     if (!gender) return res.status(400).json({ error: "Gender required" });
-    if (midterm == null)
-      return res.status(400).json({ error: "Midterm required" });
+    if (midterm == null) return res.status(400).json({ error: "Midterm required" });
     if (final == null) return res.status(400).json({ error: "Final required" });
-    const r = await run(
-      db,
-      "UPDATE students SET name=?, age=?, gender=?, midterm=?, final=? WHERE id=?",
+
+    const result = await client.query(
+      `UPDATE students 
+       SET name = $1, age = $2, gender = $3, midterm = $4, final = $5 
+       WHERE id = $6 
+       RETURNING *`,
       [name, age, gender, midterm, final, req.params.id]
     );
-    if (r.changes === 0) return res.status(404).json({ error: "Not found" });
-    const row = await get(db, "SELECT * FROM students WHERE id=?", [
-      req.params.id,
-    ]);
-    res.json(row);
-  } catch (e) {
-    console.error("PUT error:", e);
-    res.status(500).json({ error: e.message });
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+// Delete student
 app.delete("/api/students/:id", async (req, res) => {
   try {
-    const r = await run(db, "DELETE FROM students WHERE id=?", [req.params.id]);
-    if (r.changes === 0) return res.status(404).json({ error: "Not found" });
+    const result = await client.query(
+      "DELETE FROM students WHERE id = $1 RETURNING id",
+      [req.params.id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Student not found" });
+    }
+    
     res.json({ success: true });
-  } catch (e) {
-    console.error("DELETE error:", e);
-    res.status(500).json({ error: e.message });
+  } catch (err) {
+    console.error("DELETE error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Fallback (optional) -> if you navigate directly
+// Fallback route
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server http://localhost:${PORT}`));
+
+// Connect to database and start server
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Shutting down gracefully...');
+  await client.end();
+  process.exit(0);
+});
