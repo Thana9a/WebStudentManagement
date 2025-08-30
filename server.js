@@ -7,7 +7,11 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname)));
+
+// Serve static files with proper MIME types
+app.use("/style.css", express.static(path.join(__dirname, "style.css")));
+app.use("/script.js", express.static(path.join(__dirname, "script.js")));
+app.use("/index.html", express.static(path.join(__dirname, "index.html")));
 
 // Demo data for when database is not available
 const demoStudents = [
@@ -160,7 +164,7 @@ app.delete("/api/students/:id", async (req, res) => {
   }
 });
 
-// Fallback route
+// Serve main page
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
