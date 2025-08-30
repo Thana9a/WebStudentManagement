@@ -191,13 +191,13 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await fetch("/api/health");
       const data = await response.json();
-      console.log("✅ API Status:", data);
+      console.log("API Status:", data);
 
       if (data.mode === "demo") {
-        console.log("⚠️  Running in demo mode - no database connection");
+        console.log("Running in demo mode - no database connection");
       }
     } catch (err) {
-      console.error("❌ API check failed:", err);
+      console.error("API check failed:", err);
     }
   }
 
