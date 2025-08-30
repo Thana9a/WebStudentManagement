@@ -12,10 +12,7 @@ const dbConfig = {
   database: process.env.SUPABASE_DB || "postgres",
   user: process.env.SUPABASE_USER || "postgres",
   password: process.env.SUPABASE_PASSWORD,
-  ssl:
-    process.env.NODE_ENV === "production"
-      ? { rejectUnauthorized: false }
-      : false,
+  ssl: { rejectUnauthorized: false }, // Always use SSL for Supabase
 };
 
 // Create PostgreSQL client
@@ -33,6 +30,12 @@ async function connectDB() {
       );
       return;
     }
+
+    console.log("Attempting to connect to database...");
+    console.log("Host:", process.env.SUPABASE_HOST);
+    console.log("Database:", process.env.SUPABASE_DB);
+    console.log("User:", process.env.SUPABASE_USER);
+    console.log("Password:", process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET");
 
     client = new Client(dbConfig);
     await client.connect();
@@ -115,6 +118,56 @@ app.get("/api/health", (req, res) => {
       ? "Connected to Supabase database"
       : "Running in demo mode",
   });
+});
+
+// Database test endpoint for debugging
+app.get("/api/test-db", async (req, res) => {
+  try {
+    if (!dbConnected) {
+      return res.json({
+        status: "disconnected",
+        message: "Database not connected",
+        env: {
+          host: process.env.SUPABASE_HOST,
+          port: process.env.SUPABASE_PORT,
+          database: process.env.SUPABASE_DB,
+          user: process.env.SUPABASE_USER,
+          password: process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET",
+          node_env: process.env.NODE_ENV,
+        },
+      });
+    }
+
+    // Test a simple query
+    const result = await client.query("SELECT NOW() as current_time");
+
+    res.json({
+      status: "connected",
+      message: "Database connection successful",
+      time: result.rows[0].current_time,
+      env: {
+        host: process.env.SUPABASE_HOST,
+        port: process.env.SUPABASE_PORT,
+        database: process.env.SUPABASE_DB,
+        user: process.env.SUPABASE_USER,
+        password: process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET",
+        node_env: process.env.NODE_ENV,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "error",
+      message: err.message,
+      env: {
+        host: process.env.SUPABASE_HOST,
+        port: process.env.SUPABASE_PORT,
+        database: process.env.SUPABASE_DB,
+        user: process.env.SUPABASE_USER,
+        password: process.env.SUPABASE_PASSWORD ? "SET" : "NOT SET",
+        node_env: process.env.NODE_ENV,
+      },
+    });
+  }
 });
 
 // Get all students with search
@@ -230,6 +283,14 @@ app.post("/api/students", async (req, res) => {
     }
 
     // Production mode
+    console.log("Attempting to insert student into database:", {
+      name,
+      age,
+      gender,
+      midterm,
+      final,
+    });
+
     const result = await client.query(
       `INSERT INTO students (name, age, gender, midterm, final) 
        VALUES ($1, $2, $3, $4, $5) 
@@ -237,6 +298,7 @@ app.post("/api/students", async (req, res) => {
       [name, age, gender, midterm, final]
     );
 
+    console.log("Student inserted successfully:", result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("POST /api/students error:", err);
